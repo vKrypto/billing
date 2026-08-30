@@ -12,11 +12,9 @@ export async function listCustomers(uid) {
 }
 
 export async function createCustomer(uid, values) {
-  const duplicate = await getDocs(query(userCollection(uid, "customers"), where("billId", "==", values.billId.trim())));
-  if (!duplicate.empty) throw new Error("This bill ID is already in use.");
   return addDoc(userCollection(uid, "customers"), {
     name: values.name.trim(), primaryContact: values.primaryContact.trim(),
-    secondaryContact: values.secondaryContact?.trim() || "", billId: values.billId.trim(),
+    secondaryContact: values.secondaryContact?.trim() || "",
     createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
   });
 }
@@ -31,8 +29,10 @@ export async function updateCustomer(uid, customerId, previous, values, reason) 
 }
 
 export async function createBill(uid, customerId, values) {
+  const duplicate = await getDocs(query(userCollection(uid, "bills"), where("billId", "==", values.billId.trim())));
+  if (!duplicate.empty) throw new Error("This bill ID is already in use.");
   return addDoc(userCollection(uid, "bills"), {
-    customerId, description: values.description.trim(), amount: Number(values.amount),
+    customerId, billId: values.billId.trim(), description: values.description.trim(), amount: Number(values.amount), status: values.status || "pending",
     billDate: values.billDate, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
   });
 }
@@ -48,7 +48,16 @@ export async function updateEntry(uid, collectionName, id, previous, values, rea
   const ref = doc(db, "users", uid, collectionName, id);
   const auditRef = doc(userCollection(uid, "audits"));
   await runTransaction(db, async (tx) => {
-    tx.update(ref, { ...values, amount: Number(values.amount), updatedAt: serverTimestamp() });
+    const payload = { ...values, amount: Number(values.amount), updatedAt: serverTimestamp() };
+    if (collectionName === "bills") {
+      payload.billId = values.billId.trim();
+      payload.description = values.description.trim();
+      payload.status = values.status || previous.status || "pending";
+    }
+    if (collectionName === "credits") {
+      payload.note = values.note?.trim() || "";
+    }
+    tx.update(ref, payload);
     tx.set(auditRef, auditPayload(collectionName.slice(0, -1), id, "edited", reason, { before: previous, after: values }));
   });
 }
